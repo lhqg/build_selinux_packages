@@ -1,4 +1,4 @@
-name: Build Debian/Ubuntu packages for SELinux module and upload them
+name: Build and upload Debian/Ubuntu SELinux module packages
 
 on: 
   workflow_call:
@@ -13,10 +13,14 @@ on:
         required: false
         default: 'dpkg'
         type: string
-      build_os_matrix:
-        description: 'Debian/Ubuntu distro matrix'
+      build_distro:
+        description: 'Distribution family'
         required: true
-        default: '[ "debian:12", "ubuntu:24.04"]'
+        type: string
+      build_distro_versions:
+        description: 'Matrix of distribution versions to build for'
+        required: true
+        default: '[ "11", "12" ]'
         type: string
       release_upload_url:
         description: 'Provides the URL to upload the packages to'
@@ -27,9 +31,15 @@ on:
         description: 'Package version'
         required: true
         type: string
+      previous_tag:
+        description: 'Previous tag used to build changelog file'
+        required: false
+        type: string
+        default: ''
       output_dir:
         description: 'Directory name where packages are generated.'
-        required: true
+        required: false
+        default: artifacts
         type: string
     secrets:
       gpg_private_key:
@@ -46,7 +56,7 @@ jobs:
 
     strategy:
       matrix: 
-        os: ${{ fromJSON(inputs.build_os_matrix) }}
+        distro_version: ${{ fromJSON(inputs.build_distro_versions) }}
       
     env:
       gpg_private_key_file: private_key.gpg
@@ -57,27 +67,30 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@master
-        continue-on-error: ${{ matrix.os }}
         with:
-          path: ${{ inputs.source_repo_location }}
+          fetch-depth: 0
+          path: ${{github.workspace}}/${{ inputs.source_repo_location }}
         
       - name: Prepare build workspace and create private key file from secret.
         shell: bash
         run: |
-          mkdir -m 0755 -p ${{github.workspace}}/build
+          mkdir -m 0755 -p ${{github.workspace}}/build/${{ inputs.output_dir }}
           echo "${gpg_private_key}" | base64 -di > ${{github.workspace}}/build/${gpg_private_key_file}
           echo "${gpg_private_key_password}" > ${{github.workspace}}/build/.${gpg_private_key_file}.passphrase
+          ls -l ${{github.workspace}}/build/${gpg_private_key_file} ${{github.workspace}}/build/.${gpg_private_key_file}.passphrase
 
       - name: Call Docker DEB build
         id: dockerbuild
         uses: lhqg/action-os-debbuild-selinux@main
         with:
-          distro: ${{ matrix.os }}
+          distro: ${{ inputs.build_distro }}
+          distro_version: ${{ matrix.distro_version }}
           source_repo_location: ${{ inputs.source_repo_location }}
           build_material_dir: ${{ inputs.build_material_dir }}
           package_version: ${{ inputs.package_version }}
           output_dir: ${{ inputs.output_dir }}
-          gpg_name: ${{ vars.RPM_SIGNING_KEY_NAME }}
+          gpg_key_name: ${{ vars.DEB_SIGNING_KEY_NAME }}
+          gpg_key_id: ${{ vars.DEB_SIGNING_KEY_ID }}
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
       - name: Upload packages
@@ -85,6 +98,7 @@ jobs:
         shell: bash
         run: |
 
+          echo "::notice title={title}::Searching ${pkgs_dir} for packages to upload"
           if [ -n "${pkgs_dir}" -a -d "${pkgs_dir}" ]
           then
             UPLOAD_URL=$( sed -e 's/{?name,label}/?name/' <<< '${{ inputs.release_upload_url }}' )
@@ -97,7 +111,7 @@ jobs:
             rc=0
             count=0
 
-            for pkg in $( find ${pkgs_dir} -type f -a \( -name '*.deb-*' -o -name '*.changes-*' \) )
+            for pkg in $( find ${pkgs_dir} -type f -name '*.tar.bz2' )
             do 
               pkg_file_name=$(basename ${pkg})
 
@@ -121,4 +135,3 @@ jobs:
             rc=1
           fi
           exit $rc
-        working-directory: ${{github.workspace}}

@@ -1,8 +1,16 @@
-name: Build RPM packages for SELinux module and upload them
+name: Build and upload SELinux module RPM packages
 
 on: 
   workflow_call:
     inputs:
+      build_distro:
+        description: 'Distribution family'
+        required: true
+        type: string
+      build_distro_versions:
+        description: 'Matrix of distribution versions to build for'
+        required: true
+        type: string
       source_repo_location:
         description: 'Provides the directory where the source repository is to be checked out'
         required: false
@@ -17,11 +25,6 @@ on:
         description: 'Provides the relative path to the source_repository of the SELinux files'
         required: true
         default: ''
-        type: string
-      build_os_matrix:
-        description: 'Red Hat distro matrix'
-        required: true
-        default: '[ "almalinux8", "almalinux9", "fedora_37", "fedora_38", "fedora_39", "fedora_40" ]'
         type: string
       release_upload_url:
         description: 'Provides the URL to upload the built RPM to the provided release'
@@ -51,7 +54,7 @@ jobs:
 
     strategy:
       matrix: 
-        os: ${{ fromJSON(inputs.build_os_matrix) }}
+        distro_version: ${{ fromJSON(inputs.build_distro_versions) }}
       
     env:
       gpg_private_key_file: private_key.gpg
@@ -62,26 +65,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@master
-        continue-on-error: ${{ matrix.os }}
         with:
           path: ${{ inputs.source_repo_location }}
         
-      - name: Checkout action from LHQG action-os-rpmbuild-selinux repository
-        uses: actions/checkout@master
-        with:
-          repository: lhqg/action-os-rpmbuild-selinux
-          ref: ${{ matrix.os }}
-          path: ACTIONS-build
-
-      - name: Create private key file from secret.
+      - name: Prepare build workspace and create private key file from secret.
+        shell: bash
         run: |
-          echo "${gpg_private_key}" | base64 -di > ${gpg_private_key_file}
-          echo "${gpg_private_key_password}" > .${gpg_private_key_file}.passphrase
-
+            echo "${gpg_private_key}" | base64 -di > ${{github.workspace}}/${gpg_private_key_file}
+            echo "${gpg_private_key_password}" > ${{github.workspace}}/.${gpg_private_key_file}.passphrase
+            ls -l ${{github.workspace}}/${gpg_private_key_file} ${{github.workspace}}/.${gpg_private_key_file}.passphrase
+  
       - name: Call Docker RPM build
         id: dockerbuild
-        uses: ./ACTIONS-build
+        uses: lhqg/action-os-rpmbuild-selinux@main
         with:
+          distro: ${{ inputs.build_distro }}
+          distro_version: ${{ matrix.distro_version }}
           source_repo_location: ${{ inputs.source_repo_location }}
           spec_file_location: ${{ inputs.spec_file_location }}
           selinux_files_location: ${{ inputs.selinux_files_location }}
