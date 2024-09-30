@@ -1,0 +1,124 @@
+name: Build Debian/Ubuntu packages for SELinux module and upload them
+
+on: 
+  workflow_call:
+    inputs:
+      source_repo_location:
+        description: 'Provides the directory where the source repository is to be checked out'
+        required: false
+        default: 'SOURCE_REPO'
+        type: string
+      build_material_dir:
+        description: 'Provides the relative path (in the source repository) where the Makefile and the control, changelog and copyright files are located.'
+        required: false
+        default: 'dpkg'
+        type: string
+      build_os_matrix:
+        description: 'Debian/Ubuntu distro matrix'
+        required: true
+        default: '[ "debian:12", "ubuntu:24.04"]'
+        type: string
+      release_upload_url:
+        description: 'Provides the URL to upload the packages to'
+        required: false
+        default: ''
+        type: string
+      package_version:
+        description: 'Package version'
+        required: true
+        type: string
+      output_dir:
+        description: 'Directory name where packages are generated.'
+        required: true
+        type: string
+    secrets:
+      gpg_private_key:
+        description: The GPG private key
+        required: true
+      gpg_private_key_password:
+        description: The GPG private key password
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Create SELinux module from sources
+
+    strategy:
+      matrix: 
+        os: ${{ fromJSON(inputs.build_os_matrix) }}
+      
+    env:
+      gpg_private_key_file: private_key.gpg
+      gpg_private_key: ${{ secrets.gpg_private_key }}
+      gpg_private_key_password: ${{ secrets.gpg_private_key_password }}
+      pkgs_dir: ${{github.workspace}}/build/${{ inputs.output_dir }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@master
+        continue-on-error: ${{ matrix.os }}
+        with:
+          path: ${{ inputs.source_repo_location }}
+        
+      - name: Prepare build workspace and create private key file from secret.
+        shell: bash
+        run: |
+          mkdir -m 0755 -p ${{github.workspace}}/build
+          echo "${gpg_private_key}" | base64 -di > ${{github.workspace}}/build/${gpg_private_key_file}
+          echo "${gpg_private_key_password}" > ${{github.workspace}}/build/.${gpg_private_key_file}.passphrase
+
+      - name: Call Docker DEB build
+        id: dockerbuild
+        uses: lhqg/action-os-debbuild-selinux@main
+        with:
+          distro: ${{ matrix.os }}
+          source_repo_location: ${{ inputs.source_repo_location }}
+          build_material_dir: ${{ inputs.build_material_dir }}
+          package_version: ${{ inputs.package_version }}
+          output_dir: ${{ inputs.output_dir }}
+          gpg_name: ${{ vars.RPM_SIGNING_KEY_NAME }}
+          gpg_private_key_file: ${{ env.gpg_private_key_file }}
+
+      - name: Upload packages
+        id: upload_pkgs
+        shell: bash
+        run: |
+
+          if [ -n "${pkgs_dir}" -a -d "${pkgs_dir}" ]
+          then
+            UPLOAD_URL=$( sed -e 's/{?name,label}/?name/' <<< '${{ inputs.release_upload_url }}' )
+            echo "::notice title={title}::Uploading to ${UPLOAD_URL}"
+
+            ls -lR ${pkgs_dir}
+
+            cd ${pkgs_dir}
+
+            rc=0
+            count=0
+
+            for pkg in $( find ${pkgs_dir} -type f -a \( -name '*.deb-*' -o -name '*.changes-*' \) )
+            do 
+              pkg_file_name=$(basename ${pkg})
+
+              # Upload pkg
+              echo "::debug title={debug}::Uploading ${pkg_file_name}:"
+              curl \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/octet-stream" \
+                -T ${pkg} \
+                ${UPLOAD_URL}=${pkg_file_name}
+              rc_curl=$?
+              echo "::debug title={debug}::Upload return code: ${rc_curl}"
+              [ $rc_curl -eq 0 ] && count=$(( $count + 1 )) || rc=1
+            done
+            echo "::notice title={title}::Total pkgs uploaded: ${count}."
+            [ $count -lt 1 ] && rc=1
+          else
+            echo "::error title={title}:: Fatal: the signed packages directory is not set or does not exist."
+            rc=1
+          fi
+          exit $rc
+        working-directory: ${{github.workspace}}
