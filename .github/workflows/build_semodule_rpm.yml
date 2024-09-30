@@ -1,0 +1,130 @@
+name: Build RPM packages for SELinux module and upload them
+
+on: 
+  workflow_call:
+    inputs:
+      source_repo_location:
+        description: 'Provides the directory where the source repository is to be checked out'
+        required: false
+        default: 'SOURCE_REPO'
+        type: string
+      spec_file_location:
+        description: 'Provides the relative path to the source_repository of the SPEC file'
+        required: true
+        default: ''
+        type: string
+      selinux_files_location:
+        description: 'Provides the relative path to the source_repository of the SELinux files'
+        required: true
+        default: ''
+        type: string
+      build_os_matrix:
+        description: 'Red Hat distro matrix'
+        required: true
+        default: '[ "almalinux8", "almalinux9", "fedora_37", "fedora_38", "fedora_39", "fedora_40" ]'
+        type: string
+      release_upload_url:
+        description: 'Provides the URL to upload the built RPM to the provided release'
+        required: false
+        default: ''
+        type: string
+      provided_version:
+        description: 'RPM version if parameter'
+        required: false
+        type: string
+      provided_release:
+        description: 'RPM release if parameter'
+        required: false
+        type: string
+    secrets:
+      gpg_private_key:
+        description: The GPG private key
+        required: true
+      gpg_private_key_password:
+        description: The GPG private key password
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Create SELinux module from sources
+
+    strategy:
+      matrix: 
+        os: ${{ fromJSON(inputs.build_os_matrix) }}
+      
+    env:
+      gpg_private_key_file: private_key.gpg
+      gpg_private_key: ${{ secrets.gpg_private_key }}
+      gpg_private_key_password: ${{ secrets.gpg_private_key_password }}
+      rpms_dir: rpmbuild/RPMS/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@master
+        continue-on-error: ${{ matrix.os }}
+        with:
+          path: ${{ inputs.source_repo_location }}
+        
+      - name: Checkout action from LHQG action-os-rpmbuild-selinux repository
+        uses: actions/checkout@master
+        with:
+          repository: lhqg/action-os-rpmbuild-selinux
+          ref: ${{ matrix.os }}
+          path: ACTIONS-build
+
+      - name: Create private key file from secret.
+        run: |
+          echo "${gpg_private_key}" | base64 -di > ${gpg_private_key_file}
+          echo "${gpg_private_key_password}" > .${gpg_private_key_file}.passphrase
+
+      - name: Call Docker RPM build
+        id: dockerbuild
+        uses: ./ACTIONS-build
+        with:
+          source_repo_location: ${{ inputs.source_repo_location }}
+          spec_file_location: ${{ inputs.spec_file_location }}
+          selinux_files_location: ${{ inputs.selinux_files_location }}
+          provided_version: ${{ inputs.provided_version }}
+          provided_release: ${{ inputs.provided_release }}
+          gpg_name: ${{ vars.RPM_SIGNING_KEY_NAME }}
+          gpg_private_key_file: ${{ env.gpg_private_key_file }}
+
+      - name: Upload RPMs
+        id: upload_rpms
+        run: |
+
+          if [ -n "${rpms_dir}" -a -d "${rpms_dir}" ]
+          then
+            UPLOAD_URL=$( sed -e 's/{?name,label}/?name/' <<< '${{ inputs.release_upload_url }}' )
+            echo "::notice title={title}::Uploading to ${UPLOAD_URL}"
+
+            ls -lR ${rpms_dir}
+
+            rc=0
+            count=0
+
+            for rpm in $( find ${rpms_dir} -type f -name '*.rpm' )
+            do 
+              RPM_FILE_NAME=$(basename ${rpm})
+
+              # Upload RPM
+              echo "::debug title={debug}::Uploading ${RPM_FILE_NAME}:"
+              curl \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/octet-stream" \
+                -T ${rpm} \
+                ${UPLOAD_URL}=${RPM_FILE_NAME}
+              rc_curl=$?
+              echo "::debug title={debug}::Upload return code: ${rc_curl}"
+              [ $rc_curl -eq 0 ] && count=$(( $count + 1 )) || rc=1
+            done
+            echo "::notice title={title}::Total RPMs uploaded: ${count}."
+            [ $count -lt 1 ] && rc=1
+          else
+            echo "::error title={title}:: Fatal: the signed RPMs directory is not set or does not exist."
+            rc=1
+          fi
+          exit $rc
