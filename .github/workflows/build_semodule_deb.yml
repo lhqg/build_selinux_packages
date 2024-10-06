@@ -94,13 +94,18 @@ jobs:
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
       - name: Upload packages
+        if: ${{ startsWith(inputs.release_upload_url, 'https://') }}
         id: upload_pkgs
         shell: bash
         run: |
 
-          echo "::notice title={title}::Searching ${pkgs_dir} for packages to upload"
-          if [ -n "${pkgs_dir}" -a -d "${pkgs_dir}" ]
+          grep -q '^https://' <<< '${{ inputs.release_upload_url }}'
+          rc_grep=$?
+
+          if [ -n "${pkgs_dir}" -a -d "${pkgs_dir}" -a $rc_grep -eq 0 ]
           then
+            echo "::notice title={title}::Searching ${pkgs_dir} for packages to upload"
+
             UPLOAD_URL=$( sed -e 's/{?name,label}/?name/' <<< '${{ inputs.release_upload_url }}' )
             echo "::notice title={title}::Uploading to ${UPLOAD_URL}"
 

@@ -90,10 +90,14 @@ jobs:
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
       - name: Upload RPMs
+        if: ${{ startsWith(inputs.release_upload_url, 'https://') }}
         id: upload_rpms
         run: |
 
-          if [ -n "${rpms_dir}" -a -d "${rpms_dir}" ]
+          grep -q '^https://' <<< '${{ inputs.release_upload_url }}'
+          rc_grep=$?
+
+          if [ -n "${rpms_dir}" -a -d "${rpms_dir}" -a $rc_grep -eq 0 ]
           then
             UPLOAD_URL=$( sed -e 's/{?name,label}/?name/' <<< '${{ inputs.release_upload_url }}' )
             echo "::notice title={title}::Uploading to ${UPLOAD_URL}"
