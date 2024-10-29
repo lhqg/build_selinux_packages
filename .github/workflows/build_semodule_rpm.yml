@@ -21,11 +21,6 @@ on:
         required: true
         default: ''
         type: string
-      selinux_files_location:
-        description: 'Provides the relative path to the source_repository of the SELinux files'
-        required: true
-        default: ''
-        type: string
       release_upload_url:
         description: 'Provides the URL to upload the built RPM to the provided release'
         required: false
@@ -39,6 +34,18 @@ on:
         description: 'RPM release if parameter'
         required: false
         type: string
+      sftp_server:
+        description: Name or IP address of SFTP server to upload RPMs to
+        required: false
+        type: string
+      sftp_user:
+        description: User for SFTP upload of RPMs
+        required: false
+        type: string
+      sftp_remote_path:
+        description: Remote path to upload RPMs to
+        required: false
+        type: string
     secrets:
       gpg_private_key:
         description: The GPG private key
@@ -46,6 +53,9 @@ on:
       gpg_private_key_password:
         description: The GPG private key password
         required: true
+      sftp_password:
+        description: SSH password for SCP/SFTP uploads
+        required: false
 
 jobs:
   build:
@@ -83,15 +93,25 @@ jobs:
           distro_version: ${{ matrix.distro_version }}
           source_repo_location: ${{ inputs.source_repo_location }}
           spec_file_location: ${{ inputs.spec_file_location }}
-          selinux_files_location: ${{ inputs.selinux_files_location }}
           provided_version: ${{ inputs.provided_version }}
           provided_release: ${{ inputs.provided_release }}
           gpg_name: ${{ vars.RPM_SIGNING_KEY_NAME }}
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
-      - name: Upload RPMs
+      - name: SFTP Upload RPMs
+        if: ${{ startsWith(inputs.release_upload_url, 'sftp') }}
+        id: sftp_upload_rpms
+        uses: Dylan700/sftp-upload-action@latest
+        with:
+            server: ${{ inputs.sftp_server }}
+            username: ${{ inputs.sftp_user }}
+            password: ${{ secrets.sftp_password }}
+            uploads: |
+              rpmbuild/RPMS/ => ${{ inputs.sftp_remote_path }}/${{ matrix.distro_version }}/
+
+      - name: HTTP Upload RPMs
         if: ${{ startsWith(inputs.release_upload_url, 'https://') }}
-        id: upload_rpms
+        id: http_upload_rpms
         run: |
 
           grep -q '^https://' <<< '${{ inputs.release_upload_url }}'
