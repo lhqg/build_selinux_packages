@@ -101,7 +101,7 @@ jobs:
       - name: SFTP Upload RPMs
         if: ${{ startsWith(inputs.release_upload_url, 'sftp') }}
         id: sftp_upload_rpms
-        uses: Dylan700/sftp-upload-action@latest
+        uses: lhqg/EXT-sftp-upload-action@latest
         with:
             server: ${{ inputs.sftp_server }}
             username: ${{ inputs.sftp_user }}
