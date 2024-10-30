@@ -63,6 +63,7 @@ jobs:
     name: Create SELinux module from sources
 
     strategy:
+      max-parallel: 2
       matrix: 
         distro_version: ${{ fromJSON(inputs.build_distro_versions) }}
       
@@ -99,7 +100,7 @@ jobs:
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
       - name: SFTP Upload RPMs
-        if: ${{ startsWith(inputs.release_upload_url, 'sftp') }}
+        if: ${{ inputs.sftp_server != '' && inputs.sftp_remote_path != '' && inputs.sftp_user != '' }}
         id: sftp_upload_rpms
         uses: lhqg/EXT-sftp-upload-action@latest
         with:
