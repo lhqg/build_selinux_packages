@@ -1,0 +1,56 @@
+name: Build and upload YUM repository repodata
+
+on: 
+  workflow_call:
+    inputs:
+      sftp_server:
+        description: Name or IP address of SFTP server where the YUM repo is hosted
+        required: true
+        type: string
+      sftp_user:
+        description: User for SFTP
+        required: true
+        type: string
+      sftp_remote_path:
+        description: Remote path to YUM repo
+        required: true
+        type: string
+      sftp_server_key_type:
+        description: SSH key type of SFTP server
+        required: true
+        type: string
+      sftp_server_key_fingerprint:
+        description: SSH key fingerprint of SFTP server
+        required: true
+        type: string
+    secrets:
+      sftp_password:
+        description: SSH password for SCP/SFTP
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: (re-)generate repodata
+
+    env:
+      sftp_password: ${{ secrets.sftp_password }}
+
+    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@master
+        
+      - name: Prepare build workspace and create private key file from secret.
+        shell: bash
+        run: |
+            echo "${sftp_password}" > ${{github.workspace}}/.sftp_password
+  
+      - name: Call Docker RPM build
+        id: dockerbuild
+        uses: lhqg/action-os-sshfs-createrepo@main
+        with:
+          sftp_server: ${{ inputs.sftp_server }}
+          sftp_user: ${{ inputs.sftp_user }}
+          sftp_remote_path: ${{ inputs.sftp_remote_path }}
+          sftp_server_key_type: ${{ inputs.sftp_server_key_type }}
+          sftp_server_key_fingerprint: ${{ inputs.sftp_server_key_fingerprint }}
