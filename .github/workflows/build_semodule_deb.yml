@@ -41,6 +41,18 @@ on:
         required: false
         default: artifacts
         type: string
+      sftp_server:
+        description: Name or IP address of SFTP server to upload RPMs to
+        required: false
+        type: string
+      sftp_user:
+        description: User for SFTP upload of RPMs
+        required: false
+        type: string
+      sftp_remote_path:
+        description: Remote path to upload RPMs to
+        required: false
+        type: string
     secrets:
       gpg_private_key:
         description: The GPG private key
@@ -48,6 +60,9 @@ on:
       gpg_private_key_password:
         description: The GPG private key password
         required: true
+      sftp_password:
+        description: SSH password for SCP/SFTP uploads
+        required: false
 
 jobs:
   build:
@@ -93,7 +108,18 @@ jobs:
           gpg_key_id: ${{ vars.DEB_SIGNING_KEY_ID }}
           gpg_private_key_file: ${{ env.gpg_private_key_file }}
 
-      - name: Upload packages
+      - name: SFTP Upload pkgs
+        if: ${{ inputs.sftp_server != '' && inputs.sftp_remote_path != '' && inputs.sftp_user != '' }}
+        id: sftp_upload_rpms
+        uses: lhqg/EXT-sftp-upload-action@latest
+        with:
+            server: ${{ inputs.sftp_server }}
+            username: ${{ inputs.sftp_user }}
+            password: ${{ secrets.sftp_password }}
+            uploads: |
+              ${{github.workspace}}/build/${{ inputs.output_dir }}/${{ inputs.build_distro }}/ => ${{ inputs.sftp_remote_path }}/
+
+      - name: HTTP Upload packages
         if: ${{ startsWith(inputs.release_upload_url, 'https://') }}
         id: upload_pkgs
         shell: bash
