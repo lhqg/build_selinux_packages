@@ -110,7 +110,7 @@ jobs:
 
       - name: SFTP Upload pkgs
         if: ${{ inputs.sftp_server != '' && inputs.sftp_remote_path != '' && inputs.sftp_user != '' }}
-        id: sftp_upload_rpms
+        id: sftp_upload_debs
         uses: lhqg/EXT-sftp-upload-action@latest
         with:
             server: ${{ inputs.sftp_server }}
@@ -121,7 +121,7 @@ jobs:
 
       - name: HTTP Upload packages
         if: ${{ startsWith(inputs.release_upload_url, 'https://') }}
-        id: upload_pkgs
+        id: http_upload_pkgs
         shell: bash
         run: |
 
